@@ -120,7 +120,7 @@
       // A populated search field may need Enter when no submit control is exposed.
       // Keep the action tied to this observed node; never offer it for email fields.
       if (editable && value.trim() && (e.type==='search' || rname==='searchbox' ||
-          (rname==='combobox' && /search/i.test(base.label))))
+          (['combobox','textbox'].includes(rname) && e.type!=='email' && /search/i.test(base.label))))
         actions.push({...base,kind:'press_enter',value,label:'Submit '+base.label+' with Enter'});
     }
   }

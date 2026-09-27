@@ -12,6 +12,7 @@ from jev_ultrafast import browser, model
 @pytest.mark.parametrize(("field_type", "label", "value", "expected"), [
     ("search", "Search", "Browser Use", True),
     ("text", "Search or jump to", "Browser Use", True),
+    ("text", "Search models, datasets, users...", "NuExtract", True),
     ("search", "Search", "", False),
     ("email", "Enter your email", "me@example.com", False),
 ])
@@ -139,6 +140,46 @@ def test_press_enter_focus_guard_is_valid_javascript(monkeypatch):
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_press_enter_executes_for_an_observed_textbox_search_field(monkeypatch):
+    if not shutil.which("node"):
+        pytest.skip("Node is needed to evaluate the Chrome target guard")
+    calls = []
+    fixture = r"""
+const vm = require('vm');
+const field = {
+  tagName: 'INPUT', type: 'text', value: 'NuExtract', isConnected: true,
+  parentElement: null, matches: () => false, checkVisibility: () => true,
+  getAttribute: () => null,
+  getBoundingClientRect: () => ({x: 10, y: 10, width: 200, height: 25}),
+  contains: other => other === field,
+};
+const context = {
+  window: {__jevFast: {nodes: new Map([[7, field]])}},
+  document: {elementFromPoint: () => field},
+  innerWidth: 1120, innerHeight: 780,
+};
+process.stdout.write(JSON.stringify(vm.runInNewContext(process.argv[1], context)));
+"""
+
+    def cdp(method, *, session_id, **parameters):
+        calls.append(method)
+        if method == "Runtime.evaluate" and calls.count(method) == 1:
+            result = subprocess.run(["node", "-e", fixture, parameters["expression"]],
+                                    capture_output=True, text=True, check=True)
+            return {"result": {"value": json.loads(result.stdout)}}
+        if method == "Runtime.evaluate":
+            return {"result": {"value": True}}
+        return {}
+
+    monkeypatch.setattr(browser, "cdp", cdp)
+    browser.browser_operation({"operation": "act", "session": "session", "action": {
+        "id": "e2", "node": 7, "kind": "press_enter",
+        "label": "Submit Search models, datasets, users... with Enter",
+        "value": "NuExtract", "role": "textbox",
+    }})
+    assert "Input.dispatchKeyEvent" in calls
 
 
 def test_press_enter_rejects_stale_or_covered_target_without_keyboard_input(monkeypatch):

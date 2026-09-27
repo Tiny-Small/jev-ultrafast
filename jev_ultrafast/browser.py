@@ -154,9 +154,9 @@ def browser_operation(request):
               if (action.kind==='press_enter' &&
                   ((e.tagName!=='INPUT' && e.tagName!=='TEXTAREA') ||
                    e.value!==action.value || !e.value.trim() ||
-                   !(e.type==='search' || e.getAttribute('role')==='searchbox' ||
-                     (e.getAttribute('role')==='combobox' &&
-                      /search/i.test(action.label))))) return null;
+                   !(e.type==='search' || action.role==='searchbox' ||
+                     (['combobox','textbox'].includes(action.role) &&
+                      e.type!=='email' && /search/i.test(action.label))))) return null;
               const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
               if (!r.width || !r.height || x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;
               let hit=document.elementFromPoint(x,y);
