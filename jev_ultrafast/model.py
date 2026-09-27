@@ -141,7 +141,8 @@ def policy_actions(state):
 
 
 def choose(state, goal, history):
-    elements, targets, controls = action_space(policy_actions(state))
+    actions = policy_actions(state)
+    elements, targets, controls = action_space(actions)
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
@@ -151,6 +152,36 @@ def choose(state, goal, history):
     operations = {key: labels[key] for key in targets}
     operations.update({key: value["label"] for key, value in controls.items()})
     operations.update(DONE="Every requirement is visibly satisfied.", BLOCKED="No supported operation can progress.")
+    fill_index = next((index for index in range(len(history) - 1, -1, -1)
+                       if history[index].get("kind") == "fill"), None)
+    if fill_index is not None:
+        filled = str(history[fill_index].get("text") or "").strip().casefold()
+        submitted = {value.strip().casefold() for values in parse_qs(urlsplit(state["url"]).query).values()
+                     for value in values}
+        if filled and filled not in submitted and "search results page" in goal.casefold():
+            operations.pop("DONE", None)
+            matching_results_link = any(
+                action.get("kind") == "click" and action.get("role") == "link" and
+                action.get("href") and
+                ("search" in urlsplit(urljoin(state["url"], action["href"])).path.casefold()
+                 or "result" in action.get("label", "").casefold()) and
+                filled in {value.strip().casefold() for values in parse_qs(
+                    urlsplit(urljoin(state["url"], action["href"])).query).values()
+                           for value in values}
+                for action in actions
+            )
+            if matching_results_link:
+                operations.pop("WAIT", None)
+                operations.pop("BLOCKED", None)
+        if (filled and filled not in submitted and
+                not any(item.get("kind") in {"click", "press_enter", "select"}
+                        for item in history[fill_index + 1:]) and
+                any(action["kind"] == "press_enter" and
+                    str(action.get("value", "")).strip().casefold() == filled
+                    for action in actions)):
+            operations.pop("DONE", None)
+            operations.pop("WAIT", None)
+            operations.pop("BLOCKED", None)
     questions = {
         "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
     }

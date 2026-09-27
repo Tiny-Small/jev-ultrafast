@@ -96,6 +96,77 @@ def test_all_heads_are_one_request_and_only_matching_head_executes(monkeypatch):
     assert set(calls[0]["questions"]) == {"operation", "click_target", "type_text_target"}
 
 
+def test_done_is_withheld_while_a_just_filled_search_field_awaits_submission(monkeypatch):
+    current = page()
+    current["actions"][0]["value"] = "NuExtract"
+    current["actions"].insert(1, {"id": "e4", "kind": "press_enter",
+                                  "label": "Submit Search with Enter", "role": "textbox",
+                                  "value": "NuExtract", "node": 10})
+    offered = []
+
+    def post(_url, _key, body):
+        offered.append(body["questions"]["operation"]["criteria"])
+        return {"model": "test", "answers": {
+            "operation": choice(offered[-1], "DONE" if "DONE" in offered[-1] else "PRESS_ENTER"),
+            "press_enter_target": choice(["1"], "1"),
+        }}
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", post)
+
+    result = model.choose(current, "Search for NuExtract", [
+        {"kind": "fill", "action": "Search", "text": "NuExtract"},
+    ])
+
+    assert "DONE" not in offered[0]
+    assert "WAIT" not in offered[0]
+    assert "BLOCKED" not in offered[0]
+    assert result["choice"] == "e4"
+    after_wait = model.choose(current, "Search for NuExtract", [
+        {"kind": "fill", "action": "Search", "text": "NuExtract"},
+        {"kind": "wait", "action": "Wait for the page to update"},
+    ])
+    assert "DONE" not in offered[1]
+    assert after_wait["choice"] == "e4"
+    current["url"] = "https://example.test/search?q=NuExtract"
+    completed = model.choose(current, "Search for NuExtract", [
+        {"kind": "fill", "action": "Search", "text": "NuExtract"},
+    ])
+    assert "DONE" in offered[2]
+    assert completed["choice"] == "DONE"
+
+
+def test_results_page_goal_offers_matching_results_link_after_enter(monkeypatch):
+    current = page()
+    current["actions"][0]["value"] = "NuExtract"
+    current["actions"].append({"id": "e5", "kind": "click", "role": "link", "node": 30,
+                               "label": 'See 200 model results for "NuExtract"',
+                               "href": "/search/models?search=NuExtract", "value": ""})
+    offered = []
+
+    def post(_url, _key, body):
+        offered.append(body["questions"]["operation"]["criteria"])
+        return {"model": "test", "answers": {
+            "operation": choice(offered[-1], "CLICK"),
+            "click_target": choice(body["questions"]["click_target"]["criteria"], "3"),
+        }}
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", post)
+    before_enter = model.choose(current, "Search for NuExtract. Stop on the search results page", [
+        {"kind": "fill", "action": "Search", "text": "NuExtract"},
+    ])
+    decision = model.choose(current, "Search for NuExtract. Stop on the search results page", [
+        {"kind": "fill", "action": "Search", "text": "NuExtract"},
+        {"kind": "press_enter", "action": "Submit Search with Enter"},
+    ])
+
+    assert not {"DONE", "WAIT", "BLOCKED"}.intersection(offered[0])
+    assert not {"DONE", "WAIT", "BLOCKED"}.intersection(offered[1])
+    assert before_enter["choice"] == "e5"
+    assert decision["choice"] == "e5"
+
+
 def test_click_cannot_consume_a_text_target(monkeypatch):
     def post(_url, _key, body):
         return {
